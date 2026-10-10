@@ -9,6 +9,8 @@ DOMAIN = "goxlr_utility"
 DEFAULT_PORT = 14564
 FADERS = ("a", "b", "c", "d")
 CONF_LIGHTS = "fader_lights"
+CONF_SMOOTHING = "brightness_smoothing"
+DEFAULT_SMOOTHING_SECONDS = 0.2
 CONNECTION_ERRORS = (ClientError, OSError, TimeoutError, ConnectionError)
 
 

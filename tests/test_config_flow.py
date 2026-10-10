@@ -16,7 +16,12 @@ from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.goxlr_utility.const import CONF_LIGHTS, DEFAULT_PORT, DOMAIN
+from custom_components.goxlr_utility.const import (
+    CONF_LIGHTS,
+    CONF_SMOOTHING,
+    DEFAULT_PORT,
+    DOMAIN,
+)
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integration")
 
@@ -80,4 +85,4 @@ async def test_options(hass):
         result["flow_id"], {"a": "light.desk"}
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert entry.options == {CONF_LIGHTS: {"a": "light.desk"}}
+    assert entry.options == {CONF_LIGHTS: {"a": "light.desk"}, CONF_SMOOTHING: 0.2}

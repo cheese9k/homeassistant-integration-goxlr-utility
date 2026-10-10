@@ -13,7 +13,14 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
 
-from .const import CONF_LIGHTS, DEFAULT_PORT, DOMAIN, FADERS
+from .const import (
+    CONF_LIGHTS,
+    CONF_SMOOTHING,
+    DEFAULT_PORT,
+    DEFAULT_SMOOTHING_SECONDS,
+    DOMAIN,
+    FADERS,
+)
 from .helper import CannotConnect, setup_connection
 
 _LOGGER = logging.getLogger(__name__)
@@ -102,7 +109,15 @@ class OptionsFlow(config_entries.OptionsFlow):
             if len(set(bindings.values())) != len(bindings):
                 errors["base"] = "duplicate_light"
             else:
-                return self.async_create_entry(title="", data={CONF_LIGHTS: bindings})
+                return self.async_create_entry(
+                    title="",
+                    data={
+                        CONF_LIGHTS: bindings,
+                        CONF_SMOOTHING: user_input.get(
+                            CONF_SMOOTHING, DEFAULT_SMOOTHING_SECONDS
+                        ),
+                    },
+                )
         schema = vol.Schema(
             {
                 vol.Optional(
@@ -111,6 +126,22 @@ class OptionsFlow(config_entries.OptionsFlow):
                     selector.EntitySelectorConfig(domain="light")
                 )
                 for fader in FADERS
+            }
+            | {
+                vol.Optional(
+                    CONF_SMOOTHING,
+                    default=self.config_entry.options.get(
+                        CONF_SMOOTHING, DEFAULT_SMOOTHING_SECONDS
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=2,
+                        step=0.1,
+                        unit_of_measurement="s",
+                        mode=selector.NumberSelectorMode.SLIDER,
+                    )
+                )
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema, errors=errors)

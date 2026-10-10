@@ -25,7 +25,11 @@
           "a": "Fader A light",
           "b": "Fader B light",
           "c": "Fader C light",
-          "d": "Fader D light"
+          "d": "Fader D light",
+          "brightness_smoothing": "Brightness smoothing"
+        },
+        "data_description": {
+          "brightness_smoothing": "Fade duration in seconds for lights that support transitions. Start with 0.2 s; increase for softer changes, or set 0 for instant changes."
         }
       }
     },

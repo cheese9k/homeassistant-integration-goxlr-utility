@@ -29,11 +29,13 @@ This integration is available in the [Home Assistant Community Store](https://ha
 3. Move a fader to change the target's brightness. The bottom position turns the light off; moving up turns it on.
 4. Change the light in Home Assistant to set the assigned GoXLR channel volume. On a full GoXLR the motorized fader follows; a GoXLR Mini has no motors, so its physical position cannot follow remote changes.
 
+Brightness changes use a short **0.2-second fade** on lights advertising transition support, including supported Zigbee2MQTT lights. This blends the individual fader updates together. In **Configure**, adjust **Brightness smoothing** between 0 and 2 seconds: 0 disables fades; 0.2–0.4 seconds is a useful starting range. Lights that do not advertise transition support receive brightness changes without a fade. The same fade applies when a fader reaches zero and turns the light off. Zigbee2MQTT transition behavior depends on the bulb; see its [device documentation](https://www.zigbee2mqtt.io/supported-devices/).
+
 **Faders still control their assigned audio channels.** Light changes also change audio volume, including setting volume to zero when a light turns off. Use a spare channel if that suits your setup. Assign different audio channels to faders controlling different lights; faders on the same channel share one volume.
 
 The light's current brightness wins when the integration starts, reconnects, or a fader is reassigned. This preserves the room's lighting and updates the new audio channel. Unavailable lights wait until they return. Mute remains a separate audio control and does not toggle the bound light.
 
-Fader updates are limited to roughly one per 120 ms, with the latest position used for each update, including during continuous movement. Writes from Home Assistant suppress motor-position echoes for 1.5 seconds, then reconcile the final hardware position. Light service contexts and a short target-value guard prevent feedback loops. GoXLR's physical faders may slightly overshoot, so the final brightness can differ slightly from a requested value.
+Fader updates are limited to roughly one per 120 ms, with the latest position used for each update, including during continuous movement. Writes from Home Assistant suppress motor-position echoes for 1.5 seconds, then reconcile the final hardware position. Recent light service contexts and target values suppress delayed MQTT echoes from overlapping fades; identical pending targets are not sent again. GoXLR's physical faders may slightly overshoot, so the final brightness can differ slightly from a requested value.
 
 ### Upgrading an existing installation
 

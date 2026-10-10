@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from time import monotonic
 
+from homeassistant.components.light import LightEntityFeature
 from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import Context, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_track_state_change_event
 
-from .const import CONF_LIGHTS
+from .const import CONF_LIGHTS, CONF_SMOOTHING, DEFAULT_SMOOTHING_SECONDS
 
 _LOGGER = logging.getLogger(__name__)
 DEBOUNCE_SECONDS = 0.12
@@ -26,6 +28,7 @@ class FaderLightSync:
         self.hass = hass
         self.coordinator = coordinator
         self.bindings = options.get(CONF_LIGHTS, {})
+        self.smoothing_seconds = options.get(CONF_SMOOTHING, DEFAULT_SMOOTHING_SECONDS)
         self._unsubs = []
         self._timers = {}
         self._directions = {}
@@ -134,14 +137,25 @@ class FaderLightSync:
         for fader, entity_id in self.bindings.items():
             if entity_id != event.data["entity_id"]:
                 continue
-            echo = self._light_echo.get(fader)
-            if (
-                echo
-                and monotonic() < echo[2]
-                and (state.context.id == echo[0] or abs(brightness - echo[1]) <= 1)
+            echoes = self._recent_echoes(fader)
+            if any(
+                state.context.id == context_id
+                or (
+                    getattr(state.context, "user_id", None) is None
+                    and abs(brightness - target) <= 1
+                )
+                for context_id, target, _ in echoes
             ):
                 continue
             self._schedule(fader, "light_to_fader")
+
+    def _recent_echoes(self, fader):
+        """Keep older commands until delayed MQTT reports have arrived."""
+        echoes = self._light_echo.setdefault(fader, deque(maxlen=64))
+        now = monotonic()
+        while echoes and echoes[0][2] <= now:
+            echoes.popleft()
+        return echoes
 
     async def _sync(self, fader, direction):
         async with self._locks[fader]:
@@ -176,18 +190,30 @@ class FaderLightSync:
                 else:
                     if monotonic() < self._suppress_fader_until.get(fader, 0):
                         return
-                    if abs(volume - brightness) <= 1:
+                    echoes = self._recent_echoes(fader)
+                    if echoes and abs(volume - echoes[-1][1]) <= 1:
+                        # MQTT state can lag behind an in-progress fade. Avoid
+                        # restarting a fade towards the same already-sent target.
+                        return
+                    if not echoes and abs(volume - brightness) <= 1:
                         return
                     context = Context()
-                    self._light_echo[fader] = (
-                        context.id,
-                        volume,
-                        monotonic() + LIGHT_ECHO_SECONDS,
+                    echoes.append(
+                        (
+                            context.id,
+                            volume,
+                            monotonic() + LIGHT_ECHO_SECONDS,
+                        )
                     )
                     service = "turn_off" if volume == 0 else "turn_on"
                     data = {"entity_id": entity_id}
                     if volume:
-                        data.update(brightness=volume, transition=0)
+                        data["brightness"] = volume
+                    if (
+                        state.attributes.get("supported_features", 0)
+                        & LightEntityFeature.TRANSITION
+                    ):
+                        data["transition"] = self.smoothing_seconds
                     await self.hass.services.async_call(
                         "light", service, data, blocking=True, context=context
                     )

@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 
-def state(brightness=100, value="on", context_id="external"):
+def state(brightness=100, value="on", context_id="external", features=32):
     return SimpleNamespace(
         state=value,
-        attributes={"brightness": brightness},
+        attributes={"brightness": brightness, "supported_features": features},
         context=SimpleNamespace(id=context_id),
     )
 
@@ -56,7 +56,7 @@ async def test_fader_to_light_and_echo(sync):
     assert call.args[2] == {
         "entity_id": "light.desk",
         "brightness": 180,
-        "transition": 0,
+        "transition": 0.2,
     }
     sync._schedule = Mock()
     sync._light_updated(
@@ -87,7 +87,7 @@ async def test_off_both_directions(sync):
     assert sync.hass.services.async_call.call_args.args == (
         "light",
         "turn_off",
-        {"entity_id": "light.desk"},
+        {"entity_id": "light.desk", "transition": 0.2},
     )
     sync.hass.states.get.return_value = state(100, "off")
     sync.coordinator.channel_volume.return_value = 90
@@ -176,3 +176,97 @@ async def test_continuous_fader_motion_updates_without_waiting_for_release(
         sync._schedule("a", "fader_to_light")
         await asyncio.sleep(0.01)
     assert sync.hass.services.async_call.await_count >= 2
+
+
+async def test_configured_smoothing_and_instant_mode(sync):
+    sync.coordinator.channel_volume.return_value = 180
+    sync.smoothing_seconds = 0.4
+    await sync._sync("a", "fader_to_light")
+    assert sync.hass.services.async_call.call_args.args[2]["transition"] == 0.4
+    sync.smoothing_seconds = 0
+    sync.coordinator.channel_volume.return_value = 200
+    await sync._sync("a", "fader_to_light")
+    assert sync.hass.services.async_call.call_args.args[2]["transition"] == 0
+
+
+async def test_light_without_transition_support(sync):
+    sync.hass.states.get.return_value = state(features=0)
+    sync.coordinator.channel_volume.return_value = 180
+    await sync._sync("a", "fader_to_light")
+    assert sync.hass.services.async_call.call_args.args[2] == {
+        "entity_id": "light.desk",
+        "brightness": 180,
+    }
+    sync.coordinator.channel_volume.return_value = 0
+    await sync._sync("a", "fader_to_light")
+    assert sync.hass.services.async_call.call_args.args[2] == {
+        "entity_id": "light.desk"
+    }
+
+
+async def test_delayed_reports_of_previous_fade_are_not_sent_to_motor(sync):
+    sync.coordinator.channel_volume.return_value = 150
+    await sync._sync("a", "fader_to_light")
+    previous_context = sync.hass.services.async_call.call_args.kwargs["context"].id
+    sync.coordinator.channel_volume.return_value = 200
+    await sync._sync("a", "fader_to_light")
+    sync._schedule = Mock()
+    for reported in (state(150), state(175, context_id=previous_context), state(200)):
+        sync._light_updated(
+            SimpleNamespace(
+                data={
+                    "entity_id": "light.desk",
+                    "old_state": state(),
+                    "new_state": reported,
+                }
+            )
+        )
+    sync._schedule.assert_not_called()
+    sync._light_updated(
+        SimpleNamespace(
+            data={
+                "entity_id": "light.desk",
+                "old_state": state(200),
+                "new_state": state(220),
+            }
+        )
+    )
+    sync._schedule.assert_called_once_with("a", "light_to_fader")
+
+
+async def test_manual_change_to_a_recent_target_still_updates_fader(sync):
+    sync.coordinator.channel_volume.return_value = 150
+    await sync._sync("a", "fader_to_light")
+    sync.coordinator.channel_volume.return_value = 200
+    await sync._sync("a", "fader_to_light")
+    manual = state(150)
+    manual.context.user_id = "USER"
+    sync._schedule = Mock()
+    sync._light_updated(
+        SimpleNamespace(
+            data={
+                "entity_id": "light.desk",
+                "old_state": state(200),
+                "new_state": manual,
+            }
+        )
+    )
+    sync._schedule.assert_called_once_with("a", "light_to_fader")
+
+
+async def test_same_pending_target_not_restarted(sync):
+    sync.coordinator.channel_volume.return_value = 180
+    await sync._sync("a", "fader_to_light")
+    # Device still reports the old brightness while fading.
+    await sync._sync("a", "fader_to_light")
+    sync.hass.services.async_call.assert_awaited_once()
+
+
+async def test_fader_reversal_cancels_fade_even_if_state_report_is_stale(sync):
+    sync.coordinator.channel_volume.return_value = 180
+    await sync._sync("a", "fader_to_light")
+    # Turn back to 100 while HA still reports 100 from before the first command.
+    sync.coordinator.channel_volume.return_value = 100
+    await sync._sync("a", "fader_to_light")
+    assert sync.hass.services.async_call.await_count == 2
+    assert sync.hass.services.async_call.call_args.args[2]["brightness"] == 100

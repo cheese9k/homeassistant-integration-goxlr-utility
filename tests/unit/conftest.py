@@ -2,6 +2,7 @@
 
 import importlib
 import sys
+from enum import IntFlag
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
@@ -28,11 +29,14 @@ def modules(monkeypatch):
     exceptions.HomeAssistantError = type("HomeAssistantError", (Exception,), {})
     event = ModuleType("homeassistant.helpers.event")
     event.async_track_state_change_event = Mock(return_value=lambda: None)
+    light = ModuleType("homeassistant.components.light")
+    light.LightEntityFeature = IntFlag("LightEntityFeature", {"TRANSITION": 32})
     for name, value in (
         ("homeassistant.const", const),
         ("homeassistant.core", core),
         ("homeassistant.exceptions", exceptions),
         ("homeassistant.helpers.event", event),
+        ("homeassistant.components.light", light),
     ):
         if sys.platform == "win32":
             monkeypatch.setitem(sys.modules, name, value)
