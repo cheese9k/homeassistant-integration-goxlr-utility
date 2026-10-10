@@ -1,19 +1,36 @@
 {
-    "config": {
-        "abort": {
-            "already_configured": "Device is already configured"
-        },
-        "error": {
-            "cannot_connect": "Failed to connect",
-            "unknown": "Unexpected error"
-        },
-        "step": {
-            "user": {
-                "data": {
-                    "host": "Host",
-                    "port": "Port"
-                }
-            }
+  "config": {
+    "abort": {
+      "already_configured": "Device is already configured"
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "unknown": "Unexpected error"
+    },
+    "step": {
+      "user": {
+        "data": {
+          "host": "Host",
+          "port": "Port"
         }
+      }
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Fader light targets",
+        "description": "Choose a dimmable light or light group for each fader. Clear a field to disable its mapping. Changes sync both ways. The light's brightness sets the channel volume at startup and after reconnecting; this also changes audio volume.",
+        "data": {
+          "a": "Fader A light",
+          "b": "Fader B light",
+          "c": "Fader C light",
+          "d": "Fader D light"
+        }
+      }
+    },
+    "error": {
+      "duplicate_light": "Choose a different light for each fader."
+    }
+  }
 }

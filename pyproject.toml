@@ -1,52 +1,28 @@
-[tool.poetry]
-name = "goxlr_utility"
-version = "0.0.0"
+[project]
+name = "homeassistant-integration-goxlr-utility"
+version = "0.1.0"
 description = "GoXLR Utility integration for Home Assistant"
-authors = ["Aidan Timson <aidan@timmo.dev>"]
-maintainers = ["Aidan Timson <aidan@timmo.dev>"]
-license = "MIT"
-readme = "README.md"
-homepage = "https://github.com/timmo001/homeassistant-integration-goxlr-utility"
-repository = "https://github.com/timmo001/homeassistant-integration-goxlr-utility"
-documentation = "https://github.com/timmo001/homeassistant-integration-goxlr-utility"
-classifiers = [
-  "Framework :: AsyncIO",
-  "Natural Language :: English",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3",
-]
-packages = []
+requires-python = ">=3.13"
+dependencies = ["aiohttp>=3.11", "jsonpatch==1.34"]
 
-[tool.poetry.dependencies]
-python = "^3.10"
-homeassistant = "^2023.3"
-goxlrutilityapi = "^1.1.3"
-
-[tool.poetry.group.dev.dependencies]
-black = "24.3.0"
-hass-nabucasa = "0.67.1"
-pre-commit = "3.3.1"
-pre-commit-hooks = "4.4.0"
-pylint = "2.17.3"
-
-[tool.poetry.urls]
-"Bug Tracker" = "https://github.com/timmo001/homeassistant-integration-goxlr-utility/issues"
-Changelog = "https://github.com/timmo001/homeassistant-integration-goxlr-utility/releases"
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-asyncio>=0.24"]
+ha-test = ["pytest-homeassistant-custom-component>=0.13.210"]
+dev = ["ruff>=0.11"]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
 
-[tool.pylint."MESSAGES CONTROL"]
-# Reasons disabled:
-# format - handled by black
-# duplicate-code - unavoidable
-# used-before-assignment - false positives with TYPE_CHECKING structures
-disable = [
-    "duplicate-code",
-    "format",
-    "too-many-ancestors",
-    "too-many-instance-attributes",
-    "used-before-assignment",
-]
+[tool.setuptools.packages.find]
+include = ["custom_components*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

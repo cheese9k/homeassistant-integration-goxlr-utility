@@ -1,47 +1,22 @@
-name: Lint
+name: Tests and lint
 
-# yamllint disable-line rule:truthy
 on:
   push:
-    branches:
-      - master
   pull_request:
-    types:
-      - opened
-      - reopened
-      - synchronize
   workflow_dispatch:
 
-concurrency:
-  group: lint-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
-
-env:
-  DEFAULT_PYTHON: "3.10"
-
 jobs:
-  lint-pylint:
-    name: 👕 Pylint
+  test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.13", "3.14"]
     steps:
-      - name: ⤵️ Check out code from GitHub
-        uses: actions/checkout@v4.2.2
-      - name: 🏗 Set up Poetry
-        run: pipx install poetry
-      - name: 🏗 Set up Python ${{ env.DEFAULT_PYTHON }}
-        uses: actions/setup-python@v5.4.0
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-python@v5.4.0
         with:
-          python-version: ${{ env.DEFAULT_PYTHON }}
-          cache: "poetry"
-      - name: 🏗 Install Python dependencies
-        run: poetry install --no-interaction
-      - name: 🚀 Run Pylint
-        run: poetry run pylint custom_components/goxlr_utility
-  lint-jsonlint:
-    uses: timmo001/workflows/.github/workflows/lint-jsonlint.yml@master
-  lint-markdown-links:
-    uses: timmo001/workflows/.github/workflows/lint-markdown-links.yml@master
-  lint-markdownlint:
-    uses: timmo001/workflows/.github/workflows/lint-markdownlint.yml@master
-  lint-yamllint:
-    uses: timmo001/workflows/.github/workflows/lint-yamllint.yml@master
+          python-version: ${{ matrix.python }}
+      - run: pip install -e '.[test,ha-test,dev]'
+      - run: ruff check custom_components tests
+      - run: ruff format --check custom_components tests
+      - run: pytest -q

@@ -1,4 +1,5 @@
 """Entities for GoXLR Utility integration."""
+
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -6,7 +7,6 @@ from typing import Any
 
 from homeassistant.components.binary_sensor import BinarySensorEntityDescription
 from homeassistant.components.light import LightEntityDescription
-from homeassistant.components.media_player import MediaPlayerEntityDescription
 from homeassistant.components.sensor import SensorEntityDescription
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.helpers.entity import DeviceInfo
@@ -44,13 +44,17 @@ class GoXLRUtilityEntity(CoordinatorEntity[GoXLRUtilityDataUpdateCoordinator]):
             coordinator.data.hardware.usb_device.product_name,
         ]
         self._device_name = " ".join(keys)
-        self._key = f"{'_'.join(keys).lower()}_{key}"
+        self._key = f"{coordinator.data.hardware.serial_number}_{key}"
         self._name = f"{self._device_name} {name}"
         self._configuration_url = (
             f"http://{entry_data[CONF_HOST]}:{entry_data[CONF_PORT]}"
         )
         self._hw_version = ".".join(
-            [str(item) for item in coordinator.data.hardware.usb_device.version]
+            [
+                str(item)
+                for item in coordinator.data.hardware.usb_device.version
+                if item is not None
+            ]
         )
         self._identifier = coordinator.data.hardware.serial_number
         self._manufacturer = coordinator.data.hardware.usb_device.manufacturer_name
@@ -79,7 +83,7 @@ class GoXLRUtilityEntity(CoordinatorEntity[GoXLRUtilityDataUpdateCoordinator]):
         )
 
 
-@dataclass
+@dataclass(frozen=True, kw_only=True)
 class GoXLRUtilityBinarySensorEntityDescription(BinarySensorEntityDescription):
     """Class describing GoXLR Utility binary sensor entities."""
 
@@ -87,7 +91,7 @@ class GoXLRUtilityBinarySensorEntityDescription(BinarySensorEntityDescription):
     item_key: str | None = None
 
 
-@dataclass
+@dataclass(frozen=True, kw_only=True)
 class GoXLRUtilityLightEntityDescription(LightEntityDescription):
     """Class describing GoXLR Utility light entities."""
 
@@ -95,18 +99,7 @@ class GoXLRUtilityLightEntityDescription(LightEntityDescription):
     item_key: str = ""
 
 
-@dataclass
-class GoXLRUtilityMediaPlayerEntityDescription(MediaPlayerEntityDescription):
-    """Class describing GoXLR Utility media player entities."""
-
-    can_mute: bool = False
-    muted_fn: Callable = round
-    volume_pct_fn: Callable = round
-    set_muted_fn: Callable = round
-    set_volume_fn: Callable = round
-
-
-@dataclass
+@dataclass(frozen=True, kw_only=True)
 class GoXLRUtilitySensorEntityDescription(SensorEntityDescription):
     """Class describing GoXLR Utility sensor entities."""
 

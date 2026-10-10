@@ -1,21 +1,19 @@
 """Config flow for GoXLR Utility integration."""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 from typing import Any
 
-from goxlrutilityapi.const import DEFAULT_PORT
-from goxlrutilityapi.helpers import get_mixer_from_status
-from goxlrutilityapi.websocket_client import WebsocketClient
 import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_PORT
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import selector
 
-from .const import CONNECTION_ERRORS, DOMAIN
+from .const import CONF_LIGHTS, DEFAULT_PORT, DOMAIN, FADERS
 from .helper import CannotConnect, setup_connection
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,20 +25,9 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(
             CONF_PORT,
             default=DEFAULT_PORT,
-        ): int,
+        ): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
     }
 )
-
-
-async def listen_for_patches(
-    websocket_client: WebsocketClient,
-) -> None:
-    """Listen for patches from GoXLR Utility."""
-    try:
-        await websocket_client.listen()
-    except CONNECTION_ERRORS as exception:
-        _LOGGER.warning("Connection error: %s", exception)
-        raise CannotConnect from exception
 
 
 async def validate_input(
@@ -50,29 +37,28 @@ async def validate_input(
     """Validate the user input allows us to connect."""
     websocket_client = await setup_connection(hass, data)
 
-    listener_task = hass.async_create_background_task(
-        listen_for_patches(websocket_client),
-        name="GoXLR Utility Patch Listener",
-    )
-
-    status = await websocket_client.get_status()
-    mixer = get_mixer_from_status(status)
-    if mixer is None:
-        raise CannotConnect("No mixer found")
-
-    listener_task.cancel()
-    await websocket_client.disconnect()
-
-    return {
-        "title": f"{mixer.hardware.usb_device.manufacturer_name} - {mixer.hardware.usb_device.product_name}",
-        "identifier": mixer.hardware.serial_number,
-    }
+    try:
+        await websocket_client.get_status()
+        mixer = websocket_client.mixer
+        if mixer is None:
+            raise CannotConnect("No mixer found")
+        return {
+            "title": f"{mixer.hardware.usb_device.manufacturer_name} - {mixer.hardware.usb_device.product_name}",
+            "identifier": mixer.hardware.serial_number,
+        }
+    finally:
+        await websocket_client.disconnect()
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for GoXLR Utility."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        return OptionsFlow()
 
     async def async_step_user(
         self,
@@ -90,6 +76,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown"
             else:
                 await self.async_set_unique_id(info["identifier"])
+                self._abort_if_unique_id_configured()
                 return self.async_create_entry(
                     title=info["title"],
                     data=user_input,
@@ -100,3 +87,30 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=STEP_USER_DATA_SCHEMA,
             errors=errors,
         )
+
+
+class OptionsFlow(config_entries.OptionsFlow):
+    """Map physical faders to dimmable lights or light groups."""
+
+    async def async_step_init(self, user_input=None):
+        errors = {}
+        existing = self.config_entry.options.get(CONF_LIGHTS, {})
+        if user_input is not None:
+            bindings = {
+                fader: user_input[fader] for fader in FADERS if user_input.get(fader)
+            }
+            if len(set(bindings.values())) != len(bindings):
+                errors["base"] = "duplicate_light"
+            else:
+                return self.async_create_entry(title="", data={CONF_LIGHTS: bindings})
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    fader, description={"suggested_value": existing.get(fader)}
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="light")
+                )
+                for fader in FADERS
+            }
+        )
+        return self.async_show_form(step_id="init", data_schema=schema, errors=errors)

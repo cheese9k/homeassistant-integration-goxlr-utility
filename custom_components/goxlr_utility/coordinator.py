@@ -1,189 +1,113 @@
-"""Coordinator for GoXLR Utility integration."""
+"""Push state with periodic connection health and snapshot recovery."""
+
 from __future__ import annotations
 
 import asyncio
-from asyncio import Task
 from datetime import timedelta
-import logging
-from typing import Any
 
-from goxlrutilityapi.exceptions import (
-    ConnectionClosedException,
-    ConnectionErrorException,
-)
-from goxlrutilityapi.helpers import (
-    get_attribute_names_from_patch,
-    get_mixer_from_status,
-)
-from goxlrutilityapi.models.patch import Patch
-from goxlrutilityapi.models.response import Response
-from goxlrutilityapi.models.status import Mixer
-from goxlrutilityapi.websocket_client import WebsocketClient
-
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN
+from .client import GoXLRClient
+from .const import CONNECTION_ERRORS, DOMAIN, attribute_key
 from .helper import CannotConnect, setup_connection
 
 
-class GoXLRUtilityDataUpdateCoordinator(DataUpdateCoordinator[Mixer]):
-    """Class to manage fetching GoXLR Utility data from single endpoint."""
+class GoXLRUtilityDataUpdateCoordinator(DataUpdateCoordinator):
+    """Own the socket and publish authoritative daemon state."""
 
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        LOGGER: logging.Logger,
-        *,
-        entry: ConfigEntry,
-    ) -> None:
-        """Initialize global GoXLR Utility data updater."""
-        self._entry_data: dict[str, Any] = entry.data.copy()
-        self._listener_task: Task | None = None
-        self.client: WebsocketClient | None = None
-        self.title = entry.title
-        self.unsub: CALLBACK_TYPE | None = None
-
+    def __init__(self, hass, logger, *, entry):
         super().__init__(
-            hass,
-            LOGGER,
-            name=DOMAIN,
-            update_interval=timedelta(seconds=10),
+            hass, logger, name=DOMAIN, update_interval=timedelta(seconds=10)
         )
+        self.entry = entry
+        self.client: GoXLRClient | None = None
+        self.unsub = None
+        self._closing = False
+        self._command_lock = asyncio.Lock()
 
-    @property
-    def is_ready(self) -> bool:
-        """Return if the data is ready."""
-        return self.data is not None
-
-    async def setup(self) -> None:
-        """Set up connection to Websocket."""
-
+    async def setup(self):
+        self._closing = False
         self.client = await setup_connection(
-            self.hass,
-            self._entry_data.copy(),
+            self.hass, self.entry.data, self.entry.unique_id
         )
+        self.client.on_update = self._updated
+        self.client.on_disconnect = self._disconnected
+        if self.unsub is None:
+            self.unsub = self.hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_STOP, self._stop
+            )
 
-        async def listen_for_patches() -> None:
-            """Listen for patches from GoXLR Utility."""
-            if self.client is None:
-                raise ConfigEntryNotReady("Websocket not connected")
+    async def _stop(self, event):
+        await self.cleanup()
 
-            try:
-                await self.client.listen(self.patch_callback)
-            except (ConnectionClosedException, ConnectionResetError) as exception:
-                self.logger.debug(
-                    "Websocket connection closed for %s. Will retry: %s",
-                    self.title,
-                    exception,
-                )
-                if self.unsub:
-                    self.unsub()
-                    self.unsub = None
-                self.last_update_success = False
-                self.async_update_listeners()
-            except ConnectionErrorException as exception:
-                self.logger.debug(
-                    "Connection error occurred for %s. Will retry: %s",
-                    self.title,
-                    exception,
-                )
-                if self.unsub:
-                    self.unsub()
-                    self.unsub = None
-                self.last_update_success = False
-                self.async_update_listeners()
-
-        self._listener_task = self.hass.async_create_background_task(
-            listen_for_patches(),
-            name="GoXLR Utility Patch Listener",
-        )
-
-        async def cleanup(_: Event) -> None:
-            """Disconnect and cleanup items."""
-            await self.cleanup()
-
-        # Cleanup on Home Assistant shutdown
-        self.unsub = self.hass.bus.async_listen_once(
-            EVENT_HOMEASSISTANT_STOP,
-            cleanup,
-        )
-
-    async def cleanup(self) -> None:
-        """Disconnect and cleanup items."""
-        if self.client is not None:
-            await self.client.disconnect()
-
-    async def _get_mixer(self) -> Mixer:
-        """Get mixer from GoXLR Utility."""
-        if self.client is None or not self.client.connected:
-            raise ConfigEntryNotReady("Websocket not connected")
-
-        # Get status and mixer
-        status = await self.client.get_status()
-        mixer = get_mixer_from_status(status)
+    def _updated(self):
+        mixer = self.client.mixer
         if mixer is None:
-            raise ConfigEntryNotReady("No mixer found")
-        return mixer
+            self.async_set_update_error(
+                UpdateFailed("Configured GoXLR is disconnected")
+            )
+        else:
+            self.async_set_updated_data(mixer)
 
-    async def _patch_callback_task(
-        self,
-        patch: Patch,
-    ) -> None:
-        """Patch response callback task."""
-        # Get new data
-        new_data = self.data
-        if new_data is None:
-            self.logger.debug("No data available")
-            return
+    def _disconnected(self):
+        if not self._closing:
+            self.async_set_update_error(UpdateFailed("GoXLR WebSocket disconnected"))
 
-        # Get attribute names from patch path
-        attribute_names = get_attribute_names_from_patch(new_data, patch)
-        self.logger.info("Update '%s': %s", attribute_names, patch.value)
+    async def cleanup(self):
+        self._closing = True
+        if self.unsub:
+            self.unsub()
+            self.unsub = None
+        if self.client:
+            await self.client.disconnect()
+            self.client = None
 
-        # Update data
-        current_attribute = new_data
-        for attribute_name in attribute_names[:-1]:
-            current_attribute = getattr(current_attribute, attribute_name)
-        setattr(current_attribute, attribute_names[-1], patch.value)
-        self.logger.debug("Updated data: %s", new_data)
-        self.async_set_updated_data(new_data)
+    async def _async_update_data(self):
+        try:
+            if self.client is None or not self.client.connected:
+                await self.cleanup()
+                await self.setup()
+            await self.client.get_status()
+            mixer = self.client.mixer
+            if mixer is None:
+                raise UpdateFailed("Configured GoXLR mixer not found")
+            return mixer
+        except (*CONNECTION_ERRORS, CannotConnect, ValueError) as error:
+            await self.cleanup()
+            raise UpdateFailed(str(error)) from error
 
-        # Update listeners
-        self.last_update_success = True
-        self.async_update_listeners()
+    def fader_channel(self, fader):
+        return getattr(self.data.fader_status, fader).channel
 
-    async def patch_callback(
-        self,
-        response: Response[Patch],
-    ) -> None:
-        """Patch response callback function."""
-        self.hass.async_create_background_task(
-            self._patch_callback_task(response.data),
-            name="Patch Callback Task",
+    def channel_volume(self, channel):
+        return getattr(self.data.levels.volumes, attribute_key(channel))
+
+    def channel_fader(self, channel):
+        return next(
+            (
+                key
+                for key, value in vars(self.data.fader_status).items()
+                if value.channel == channel
+            ),
+            None,
         )
 
-    async def _async_update_data(self) -> Mixer:
-        """Update GoXLR Utility data from WebSocket."""
-        if (
-            self.client is None
-            or not self.client.connected
-            or self._listener_task is None
-        ):
+    async def async_command(self, name, *args):
+        """Serialize writes and reconcile acknowledgements with a snapshot."""
+        async with self._command_lock:
+            if (
+                not self.last_update_success
+                or self.client is None
+                or not self.client.connected
+            ):
+                raise HomeAssistantError("GoXLR is unavailable")
             try:
-                await self.setup()
-            except (asyncio.TimeoutError, CannotConnect) as exception:
-                self.logger.info("Could not connect to GoXLR Utility: %s", exception)
+                await self.client.command(name, *args)
+                await self.async_request_refresh()
+            except (*CONNECTION_ERRORS, ValueError) as error:
+                raise HomeAssistantError(f"GoXLR command failed: {error}") from error
 
-        if self.data is None:
-            mixer: Mixer = await self._get_mixer()
-            self.async_set_updated_data(mixer)
-            self.logger.debug("Data updated: %s", mixer)
-
-        if self.data is None:
-            raise ConfigEntryNotReady("No data found")
-
-        return self.data
+    async def async_set_volume(self, channel, value):
+        await self.async_command("SetVolume", channel, max(0, min(255, round(value))))

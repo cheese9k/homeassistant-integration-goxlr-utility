@@ -1,117 +1,83 @@
-"""Test the GoXLR Utility config flow."""
+"""Exercise config and options flows with Home Assistant's real flow manager."""
+
+import sys
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from goxlrutilityapi.const import DEFAULT_HOST, DEFAULT_PORT
-from goxlrutilityapi.exceptions import ConnectionErrorException
-from goxlrutilityapi.helpers.tests.models.status import StatusFactory
-from goxlrutilityapi.models.status import Status
-from polyfactory.pytest_plugin import register_fixture
 import pytest
 
+if sys.platform == "win32":
+    pytest.skip(
+        "Home Assistant integration tests require Linux", allow_module_level=True
+    )
+
 from homeassistant import config_entries
-from homeassistant.components.goxlr_utility.const import DOMAIN
 from homeassistant.const import CONF_HOST, CONF_PORT
-from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-pytestmark = pytest.mark.usefixtures("mock_setup_entry")
-status_factory_fixture = register_fixture(StatusFactory, name="fixture_status")
+from custom_components.goxlr_utility.const import CONF_LIGHTS, DEFAULT_PORT, DOMAIN
+
+pytestmark = pytest.mark.usefixtures("enable_custom_integration")
 
 
-async def test_form(
-    hass: HomeAssistant,
-    mock_setup_entry: AsyncMock,
-    fixture_status: Status,
-) -> None:
-    """Test we get the form."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={
-            "source": config_entries.SOURCE_USER,
-        },
-    )
-    assert "type" in result and result["type"] == FlowResultType.FORM
-    assert "errors" in result and result["errors"] == {}
-
-    with patch(
-        "goxlrutilityapi.websocket_client.WebsocketClient.connect",
-    ), patch(
-        "goxlrutilityapi.websocket_client.WebsocketClient.listen",
-    ), patch(
-        "goxlrutilityapi.websocket_client.WebsocketClient.get_status",
-        return_value=fixture_status,
-    ), patch(
-        "goxlrutilityapi.websocket_client.WebsocketClient.disconnect",
+async def test_form_and_duplicate(hass):
+    info = {"title": "GoXLR", "identifier": "SERIAL"}
+    with (
+        patch(
+            "custom_components.goxlr_utility.config_flow.validate_input",
+            return_value=info,
+        ),
+        patch("custom_components.goxlr_utility.async_setup_entry", return_value=True),
     ):
-        result2 = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            {
-                CONF_HOST: DEFAULT_HOST,
-                CONF_PORT: DEFAULT_PORT,
-            },
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
         )
-        await hass.async_block_till_done()
+        assert result["type"] == FlowResultType.FORM
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_HOST: "localhost", CONF_PORT: DEFAULT_PORT}
+        )
+        assert result["type"] == FlowResultType.CREATE_ENTRY
+        duplicate = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={CONF_HOST: "localhost", CONF_PORT: DEFAULT_PORT},
+        )
+        assert duplicate["type"] == FlowResultType.ABORT
+        assert duplicate["reason"] == "already_configured"
 
-    assert "type" in result2 and result2["type"] == FlowResultType.CREATE_ENTRY
-    # assert "title" in result2 and result2["title"] == FIXTURE_NAME
-    assert "data" in result2 and result2["data"] == {
-        CONF_HOST: DEFAULT_HOST,
-        CONF_PORT: DEFAULT_PORT,
-    }
-    assert len(mock_setup_entry.mock_calls) == 1
 
+async def test_validation_always_disconnects(hass):
+    from custom_components.goxlr_utility.config_flow import validate_input
+    from custom_components.goxlr_utility.helper import CannotConnect
 
-async def test_form_connection_error(hass: HomeAssistant) -> None:
-    """Test we handle cannot connect error."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={
-            "source": config_entries.SOURCE_USER,
-        },
-    )
-
+    client = SimpleNamespace(get_status=AsyncMock(), disconnect=AsyncMock(), mixer=None)
     with patch(
-        "goxlrutilityapi.websocket_client.WebsocketClient.connect",
-        side_effect=ConnectionErrorException,
+        "custom_components.goxlr_utility.config_flow.setup_connection",
+        return_value=client,
     ):
-        result2 = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            {
-                CONF_HOST: DEFAULT_HOST,
-                CONF_PORT: DEFAULT_PORT,
-            },
-        )
-
-    assert "type" in result2 and result2["type"] == FlowResultType.FORM
-    assert "errors" in result2 and result2["errors"] == {"base": "cannot_connect"}
+        with pytest.raises(CannotConnect):
+            await validate_input(
+                hass, {CONF_HOST: "localhost", CONF_PORT: DEFAULT_PORT}
+            )
+    client.disconnect.assert_awaited_once()
 
 
-async def test_form_bad_message(hass: HomeAssistant) -> None:
-    """Test we handle cannot connect error."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={
-            "source": config_entries.SOURCE_USER,
-        },
+async def test_options(hass):
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_HOST: "localhost", CONF_PORT: DEFAULT_PORT},
+        unique_id="SERIAL",
     )
-
-    with patch(
-        "goxlrutilityapi.websocket_client.WebsocketClient.connect",
-    ), patch(
-        "goxlrutilityapi.websocket_client.WebsocketClient._listen_for_messages",
-    ), patch(
-        "goxlrutilityapi.websocket_client.WebsocketClient._send_message",
-        return_value=None,
-    ), patch(
-        "goxlrutilityapi.websocket_client.WebsocketClient.disconnect"
-    ):
-        result2 = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            {
-                CONF_HOST: DEFAULT_HOST,
-                CONF_PORT: DEFAULT_PORT,
-            },
-        )
-
-    assert "type" in result2 and result2["type"] == FlowResultType.FORM
-    assert "errors" in result2 and result2["errors"] == {"base": "unknown"}
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] == FlowResultType.FORM
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"a": "light.desk", "b": "light.desk"}
+    )
+    assert result["errors"] == {"base": "duplicate_light"}
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"a": "light.desk"}
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options == {CONF_LIGHTS: {"a": "light.desk"}}

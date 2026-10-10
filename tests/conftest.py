@@ -1,14 +1,9 @@
-"""Common fixtures for the GoXLR Utility tests."""
-from collections.abc import Generator
-from unittest.mock import AsyncMock, patch
+"""Home Assistant integration fixtures (Linux integration tests only)."""
 
 import pytest
 
 
 @pytest.fixture
-def mock_setup_entry() -> Generator[AsyncMock, None, None]:
-    """Override async_setup_entry."""
-    with patch(
-        "homeassistant.components.goxlr_utility.async_setup_entry", return_value=True
-    ) as mock_setup_entry:
-        yield mock_setup_entry
+def enable_custom_integration(enable_custom_integrations):
+    """Enable loading our custom component."""
+    return enable_custom_integrations

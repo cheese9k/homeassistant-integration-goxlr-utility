@@ -1,4 +1,5 @@
 """Support for GoXLR Utility sensors."""
+
 from __future__ import annotations
 
 from typing import Any, cast
@@ -10,7 +11,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
 
-from .const import DOMAIN
 from .coordinator import GoXLRUtilityDataUpdateCoordinator
 from .entity import GoXLRUtilityEntity, GoXLRUtilitySensorEntityDescription
 
@@ -21,7 +21,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up GoXLR Utility sensor based on a config entry."""
-    coordinator: GoXLRUtilityDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: GoXLRUtilityDataUpdateCoordinator = entry.runtime_data
 
     sensor_descriptions: list[GoXLRUtilitySensorEntityDescription] = [
         GoXLRUtilitySensorEntityDescription(

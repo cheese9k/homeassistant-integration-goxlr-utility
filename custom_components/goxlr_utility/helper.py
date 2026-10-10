@@ -1,40 +1,26 @@
-"""Helper for GoXLR Utility integration."""
-from __future__ import annotations
+"""Connection helpers."""
 
-import logging
-from typing import Any
+import asyncio
 
-import async_timeout
-from goxlrutilityapi.websocket_client import WebsocketClient
-
-from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .client import GoXLRClient
 from .const import CONNECTION_ERRORS
-
-_LOGGER = logging.getLogger(__name__)
-
-
-async def setup_connection(
-    hass: HomeAssistant,
-    data: dict[str, Any],
-) -> WebsocketClient:
-    """Set up connection to GoXLR Utility."""
-    async with async_timeout.timeout(10):
-        websocket_client = WebsocketClient()
-        try:
-            await websocket_client.connect(
-                data["host"],
-                data["port"],
-                async_get_clientsession(hass),
-            )
-        except CONNECTION_ERRORS as exception:
-            _LOGGER.warning("Connection error: %s", exception)
-            raise CannotConnect from exception
-
-        return websocket_client
 
 
 class CannotConnect(HomeAssistantError):
-    """Error to indicate we cannot connect."""
+    """Unable to connect to the daemon."""
+
+
+async def setup_connection(hass, data, serial=None):
+    client = GoXLRClient(
+        async_get_clientsession(hass), data["host"], data["port"], serial
+    )
+    try:
+        async with asyncio.timeout(10):
+            await client.connect()
+        return client
+    except CONNECTION_ERRORS as error:
+        await client.disconnect()
+        raise CannotConnect from error

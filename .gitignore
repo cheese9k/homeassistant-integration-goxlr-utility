@@ -93,6 +93,7 @@ ENV/
 
 # ruff
 .ruff_cache
+.test-tools/
 
 # IntelliJ Idea family of suites
 .idea

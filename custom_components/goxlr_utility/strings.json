@@ -15,5 +15,22 @@
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Fader light targets",
+        "description": "Choose a dimmable light or light group for each fader. Clear a field to disable its mapping. Changes sync both ways. The light's brightness sets the channel volume at startup and after reconnecting; this also changes audio volume.",
+        "data": {
+          "a": "Fader A light",
+          "b": "Fader B light",
+          "c": "Fader C light",
+          "d": "Fader D light"
+        }
+      }
+    },
+    "error": {
+      "duplicate_light": "Choose a different light for each fader."
+    }
   }
 }

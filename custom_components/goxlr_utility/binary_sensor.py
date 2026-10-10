@@ -1,10 +1,8 @@
 """Support for GoXLR Utility binary sensors."""
+
 from __future__ import annotations
 
 from typing import Any
-
-from goxlrutilityapi.const import NAME_MAP
-from goxlrutilityapi.models.map_item import MapItem
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -12,7 +10,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import NAME_MAP, MapItem
 from .coordinator import GoXLRUtilityDataUpdateCoordinator
 from .entity import GoXLRUtilityBinarySensorEntityDescription, GoXLRUtilityEntity
 
@@ -23,7 +21,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up GoXLR Utility sensor based on a config entry."""
-    coordinator: GoXLRUtilityDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: GoXLRUtilityDataUpdateCoordinator = entry.runtime_data
 
     binary_sensor_descriptions = []
     for key in vars(coordinator.data.button_down):
